@@ -45,12 +45,17 @@ const CONTENT_SECURITY_POLICY = [
     "worker-src 'self'",
 ].join("; ");
 
-function securityHeaders(req, res, next) {
-    res.set("X-Content-Type-Options", "nosniff");
-    res.set("Referrer-Policy", "no-referrer");
-    res.set("Content-Security-Policy", CONTENT_SECURITY_POLICY);
-    res.set("Permissions-Policy", "geolocation=(), camera=(), microphone=()");
-    next();
+function createSecurityHeaders({ hsts = false } = {}) {
+    return function securityHeaders(req, res, next) {
+        res.set("X-Content-Type-Options", "nosniff");
+        res.set("Referrer-Policy", "no-referrer");
+        res.set("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+        res.set("Permissions-Policy", "geolocation=(), camera=(), microphone=()");
+        if (hsts) {
+            res.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+        }
+        next();
+    };
 }
 
 function corsHeaders(req, res, next) {
@@ -161,12 +166,12 @@ function respondWithPasswords(req, res, raw) {
         });
 }
 
-export function createApp({ rateLimit = 120, rateWindowMs = 60_000, trustProxy = false } = {}) {
+export function createApp({ rateLimit = 120, rateWindowMs = 60_000, trustProxy = false, hsts = false } = {}) {
     const app = express();
     app.disable("x-powered-by");
     app.set("trust proxy", trustProxy === true);
 
-    app.use(securityHeaders);
+    app.use(createSecurityHeaders({ hsts }));
 
     const api = express.Router();
     api.use(corsHeaders);
