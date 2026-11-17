@@ -1,0 +1,475 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "Password Generator API",
+        "version": "2.0.0",
+        "summary": "Генерация криптостойких паролей",
+        "description": "REST API генератора паролей. Авторизация не требуется, секреты не сохраняются и не логируются. Для агента достаточно GET-запроса без тела. Ошибки возвращаются в формате application/problem+json, успешные ответы — с заголовком Cache-Control: no-store.",
+        "license": {
+            "name": "ISC"
+        }
+    },
+    "servers": [
+        {
+            "url": "/",
+            "description": "Текущий сервер"
+        }
+    ],
+    "tags": [
+        {
+            "name": "passwords",
+            "description": "Генерация паролей"
+        },
+        {
+            "name": "meta",
+            "description": "Служебная информация и документация"
+        }
+    ],
+    "x-ai-usage": {
+        "summary": "Агенту достаточно одного GET-запроса без тела и авторизации.",
+        "steps": [
+            "GET /api/v1/options — узнать дефолты, лимиты и категории символов",
+            "GET /api/v1/passwords?length=16&letters=true&digits=true&symbols=true&count=4 — получить пароли",
+            "При ответе 400 прочитать errors[].field и повторить запрос с исправленным параметром"
+        ],
+        "notes": [
+            "Неизвестные параметры отклоняются с кодом 400, а не игнорируются",
+            "Пароли не кешируются и не сохраняются на сервере",
+            "Ограничение частоты: 120 запросов в минуту с одного IP"
+        ]
+    },
+    "paths": {
+        "/api/v1": {
+            "get": {
+                "tags": ["meta"],
+                "operationId": "getApiIndex",
+                "summary": "Навигация по API",
+                "description": "Возвращает список эндпоинтов, ссылки на OpenAPI и документацию, а также готовый пример запроса.",
+                "responses": {
+                    "200": {
+                        "description": "Карта API",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": { "type": "string" },
+                                        "version": { "type": "string" },
+                                        "description": { "type": "string" },
+                                        "openapi": { "type": "string" },
+                                        "docs": { "type": "string" },
+                                        "endpoints": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "method": { "type": "string" },
+                                                    "path": { "type": "string" },
+                                                    "description": { "type": "string" }
+                                                }
+                                            }
+                                        },
+                                        "example": { "type": "string" },
+                                        "notes": {
+                                            "type": "array",
+                                            "items": { "type": "string" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "429": { "$ref": "#/components/responses/TooManyRequests" }
+                }
+            }
+        },
+        "/api/v1/health": {
+            "get": {
+                "tags": ["meta"],
+                "operationId": "getHealth",
+                "summary": "Проверка доступности",
+                "responses": {
+                    "200": {
+                        "description": "Сервис доступен",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "status": { "type": "string", "const": "ok" },
+                                        "version": { "type": "string" },
+                                        "uptimeSeconds": { "type": "integer" },
+                                        "time": { "type": "string", "format": "date-time" }
+                                    }
+                                },
+                                "example": {
+                                    "status": "ok",
+                                    "version": "2.0.0",
+                                    "uptimeSeconds": 42,
+                                    "time": "2026-11-17T10:00:00.000Z"
+                                }
+                            }
+                        }
+                    },
+                    "429": { "$ref": "#/components/responses/TooManyRequests" }
+                }
+            }
+        },
+        "/api/v1/options": {
+            "get": {
+                "tags": ["passwords"],
+                "operationId": "getOptions",
+                "summary": "Дефолты, лимиты и категории символов",
+                "description": "Самодокументируемый справочник: агент может узнать допустимые диапазоны до генерации.",
+                "responses": {
+                    "200": {
+                        "description": "Параметры генератора",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "defaults": { "$ref": "#/components/schemas/PasswordOptions" },
+                                        "limits": {
+                                            "type": "object",
+                                            "properties": {
+                                                "length": { "$ref": "#/components/schemas/IntegerRange" },
+                                                "count": { "$ref": "#/components/schemas/IntegerRange" }
+                                            }
+                                        },
+                                        "categories": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "description": { "type": "string" },
+                                                    "size": { "type": "integer" },
+                                                    "characters": { "type": "string" }
+                                                }
+                                            }
+                                        },
+                                        "example": { "type": "string" }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "429": { "$ref": "#/components/responses/TooManyRequests" }
+                }
+            }
+        },
+        "/api/v1/passwords": {
+            "get": {
+                "tags": ["passwords"],
+                "operationId": "generatePasswords",
+                "summary": "Сгенерировать пароли (GET)",
+                "description": "Основной способ для AI-агентов: параметры передаются в query-строке, тело не требуется. Каждый пароль гарантированно содержит хотя бы один символ каждой включённой категории.",
+                "parameters": [
+                    { "$ref": "#/components/parameters/length" },
+                    { "$ref": "#/components/parameters/letters" },
+                    { "$ref": "#/components/parameters/digits" },
+                    { "$ref": "#/components/parameters/symbols" },
+                    { "$ref": "#/components/parameters/count" }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Пароли сгенерированы",
+                        "headers": {
+                            "Cache-Control": {
+                                "description": "Всегда no-store",
+                                "schema": { "type": "string" }
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": { "$ref": "#/components/schemas/PasswordResponse" },
+                                "example": {
+                                    "passwords": ["aB3!xY9z", "Q7_m2Lp0", "r8#Tz4Kd", "W1@sV6bn"],
+                                    "options": {
+                                        "length": 8,
+                                        "letters": true,
+                                        "digits": true,
+                                        "symbols": true,
+                                        "count": 4
+                                    },
+                                    "generatedAt": "2026-11-17T10:00:00.000Z"
+                                }
+                            }
+                        }
+                    },
+                    "400": { "$ref": "#/components/responses/BadRequest" },
+                    "429": { "$ref": "#/components/responses/TooManyRequests" },
+                    "500": { "$ref": "#/components/responses/InternalError" }
+                }
+            },
+            "post": {
+                "tags": ["passwords"],
+                "operationId": "generatePasswordsPost",
+                "summary": "Сгенерировать пароли (POST)",
+                "description": "Канонический способ для интеграций: параметры передаются JSON-объектом. Состав полей совпадает с query-параметрами GET.",
+                "requestBody": {
+                    "required": false,
+                    "content": {
+                        "application/json": {
+                            "schema": { "$ref": "#/components/schemas/PasswordOptions" },
+                            "example": {
+                                "length": 16,
+                                "letters": true,
+                                "digits": true,
+                                "symbols": false,
+                                "count": 4
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Пароли сгенерированы",
+                        "content": {
+                            "application/json": {
+                                "schema": { "$ref": "#/components/schemas/PasswordResponse" }
+                            }
+                        }
+                    },
+                    "400": { "$ref": "#/components/responses/BadRequest" },
+                    "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+                    "415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+                    "429": { "$ref": "#/components/responses/TooManyRequests" },
+                    "500": { "$ref": "#/components/responses/InternalError" }
+                }
+            }
+        },
+        "/openapi.json": {
+            "get": {
+                "tags": ["meta"],
+                "operationId": "getOpenApiSpec",
+                "summary": "Эта спецификация",
+                "description": "Спецификация OpenAPI 3.1 в формате JSON. JSON одновременно является валидным YAML 1.2, поэтому парсеры YAML тоже подходят.",
+                "responses": {
+                    "200": {
+                        "description": "Спецификация",
+                        "content": {
+                            "application/json": {
+                                "schema": { "type": "object" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "parameters": {
+            "length": {
+                "name": "length",
+                "in": "query",
+                "required": false,
+                "description": "Длина пароля в символах",
+                "schema": {
+                    "type": "integer",
+                    "minimum": 4,
+                    "maximum": 64,
+                    "default": 8
+                }
+            },
+            "letters": {
+                "name": "letters",
+                "in": "query",
+                "required": false,
+                "description": "Использовать латинские буквы в обоих регистрах",
+                "schema": {
+                    "type": "boolean",
+                    "default": true
+                }
+            },
+            "digits": {
+                "name": "digits",
+                "in": "query",
+                "required": false,
+                "description": "Использовать цифры 0-9",
+                "schema": {
+                    "type": "boolean",
+                    "default": true
+                }
+            },
+            "symbols": {
+                "name": "symbols",
+                "in": "query",
+                "required": false,
+                "description": "Использовать спецсимволы !@#$%^&*_-+=",
+                "schema": {
+                    "type": "boolean",
+                    "default": true
+                }
+            },
+            "count": {
+                "name": "count",
+                "in": "query",
+                "required": false,
+                "description": "Количество паролей в ответе",
+                "schema": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "default": 4
+                }
+            }
+        },
+        "schemas": {
+            "IntegerRange": {
+                "type": "object",
+                "properties": {
+                    "min": { "type": "integer" },
+                    "max": { "type": "integer" }
+                },
+                "required": ["min", "max"]
+            },
+            "PasswordOptions": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Параметры генерации. Все поля необязательны, значения по умолчанию указаны в defaults. Неизвестные поля отклоняются.",
+                "properties": {
+                    "length": {
+                        "type": "integer",
+                        "minimum": 4,
+                        "maximum": 64,
+                        "default": 8,
+                        "description": "Длина пароля"
+                    },
+                    "letters": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Латинские буквы"
+                    },
+                    "digits": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Цифры"
+                    },
+                    "symbols": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Спецсимволы"
+                    },
+                    "count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "default": 4,
+                        "description": "Количество паролей"
+                    }
+                }
+            },
+            "PasswordResponse": {
+                "type": "object",
+                "properties": {
+                    "passwords": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "minItems": 1,
+                        "maxItems": 10
+                    },
+                    "options": { "$ref": "#/components/schemas/PasswordOptions" },
+                    "generatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": ["passwords", "options", "generatedAt"]
+            },
+            "FieldError": {
+                "type": "object",
+                "properties": {
+                    "field": { "type": "string" },
+                    "message": { "type": "string" }
+                },
+                "required": ["field", "message"]
+            },
+            "Problem": {
+                "type": "object",
+                "description": "Ошибка в формате RFC 9457",
+                "properties": {
+                    "type": { "type": "string" },
+                    "title": { "type": "string" },
+                    "status": { "type": "integer" },
+                    "detail": { "type": "string" },
+                    "instance": { "type": "string" },
+                    "errors": {
+                        "type": "array",
+                        "items": { "$ref": "#/components/schemas/FieldError" }
+                    }
+                },
+                "required": ["title", "status"]
+            }
+        },
+        "responses": {
+            "BadRequest": {
+                "description": "Некорректные параметры запроса",
+                "content": {
+                    "application/problem+json": {
+                        "schema": { "$ref": "#/components/schemas/Problem" },
+                        "example": {
+                            "type": "about:blank",
+                            "title": "Некорректные параметры",
+                            "status": 400,
+                            "detail": "Проверьте значения параметров запроса",
+                            "instance": "/api/v1/passwords",
+                            "errors": [
+                                {
+                                    "field": "length",
+                                    "message": "Длина должна быть от 4 до 64"
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "PayloadTooLarge": {
+                "description": "Тело запроса больше 16 КБ",
+                "content": {
+                    "application/problem+json": {
+                        "schema": { "$ref": "#/components/schemas/Problem" }
+                    }
+                }
+            },
+            "UnsupportedMediaType": {
+                "description": "Тело передано не как application/json",
+                "content": {
+                    "application/problem+json": {
+                        "schema": { "$ref": "#/components/schemas/Problem" }
+                    }
+                }
+            },
+            "TooManyRequests": {
+                "description": "Превышен лимит запросов",
+                "headers": {
+                    "Retry-After": {
+                        "description": "Секунды до сброса лимита",
+                        "schema": { "type": "integer" }
+                    },
+                    "RateLimit-Limit": {
+                        "description": "Лимит запросов в минуту",
+                        "schema": { "type": "integer" }
+                    },
+                    "RateLimit-Remaining": {
+                        "description": "Остаток запросов в текущем окне",
+                        "schema": { "type": "integer" }
+                    }
+                },
+                "content": {
+                    "application/problem+json": {
+                        "schema": { "$ref": "#/components/schemas/Problem" }
+                    }
+                }
+            },
+            "InternalError": {
+                "description": "Внутренняя ошибка сервера",
+                "content": {
+                    "application/problem+json": {
+                        "schema": { "$ref": "#/components/schemas/Problem" }
+                    }
+                }
+            }
+        }
+    }
+}

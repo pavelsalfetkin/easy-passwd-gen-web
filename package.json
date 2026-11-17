@@ -1,0 +1,26 @@
+{
+	"name": "easy-passwd-gen-web",
+	"version": "2.0.0",
+	"description": "Генератор паролей: адаптивное web-приложение, PWA и REST API с OpenAPI",
+	"type": "module",
+	"main": "server.js",
+	"engines": {
+		"node": ">=18.11"
+	},
+	"scripts": {
+		"start": "node server.js",
+		"dev": "node --watch server.js",
+		"test": "node --test tests/password.test.js tests/api.test.js",
+		"icons": "node scripts/generate-icons.js"
+	},
+	"keywords": [
+		"password-generator",
+		"pwa",
+		"openapi",
+		"express"
+	],
+	"license": "ISC",
+	"dependencies": {
+		"express": "^4.19.2"
+	}
+}
